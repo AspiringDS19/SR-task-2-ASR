@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- SEO -->
+  <title>VoiceScribe – Automatic Speech Recognition Tool</title>
+  <meta name="description" content="VoiceScribe is a real-time, browser-based Automatic Speech Recognition tool powered by OpenAI Whisper. Record your voice or upload an audio file and get an instant transcript." />
+  <meta name="keywords" content="ASR, speech recognition, Whisper, voice to text, transcription" />
+
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/visualizer.css') }}" />
+</head>
+<body>
+
+<!-- ── Spinner Overlay ──────────────────────────────────────────────── -->
+<div class="spinner-overlay" id="spinnerOverlay" role="status" aria-label="Transcribing audio">
+  <div class="spinner"></div>
+  <span class="spinner-label">Transcribing with Whisper…</span>
+</div>
+
+<!-- ── Toast Container ──────────────────────────────────────────────── -->
+<div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+<!-- ── App Shell ─────────────────────────────────────────────────────── -->
+<div class="app-shell">
+
+  <!-- ── Header ──────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon" aria-hidden="true">🎙</div>
+      <div class="logo-text">
+        <h1>VoiceScribe</h1>
+        <p>Automatic Speech Recognition</p>
+      </div>
+    </div>
+
+    <div class="status-pill" id="statusPill">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusLabel">Loading model…</span>
+    </div>
+  </header>
+
+  <!-- ── Stats Row ────────────────────────────────────────────────────── -->
+  <section class="stats-row" aria-label="Session statistics">
+    <div class="stat-card">
+      <div class="stat-icon cyan" aria-hidden="true">🎤</div>
+      <div class="stat-info">
+        <div class="stat-val" id="statRecordings">0</div>
+        <div class="stat-lbl">Recordings</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon purple" aria-hidden="true">📝</div>
+      <div class="stat-info">
+        <div class="stat-val" id="statWords">0</div>
+        <div class="stat-lbl">Total Words</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green" aria-hidden="true">🔤</div>
+      <div class="stat-info">
+        <div class="stat-val" id="statChars">0</div>
+        <div class="stat-lbl">Characters</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon amber" aria-hidden="true">⚡</div>
+      <div class="stat-info">
+        <div class="stat-val" id="statAvgTime">—</div>
+        <div class="stat-lbl">Avg. Speed</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Main Grid ─────────────────────────────────────────────────────── -->
+  <div class="main-grid">
+
+    <!-- ── Recorder Card ─────────────────────────────────────────── -->
+    <div class="card recorder-card" id="recorderCard">
+      <div class="card-title"><span class="icon">🎙</span> Live Recorder</div>
+
+      <!-- Visualizer -->
+      <div class="visualizer-wrap" aria-label="Audio waveform visualizer">
+        <canvas id="visualizer"></canvas>
+        <span class="vis-idle-text" id="visIdleText">Waiting for audio…</span>
+      </div>
+
+      <!-- Timer -->
+      <div class="timer" id="timer" aria-live="polite">00:00</div>
+
+      <!-- Mic Button -->
+      <div class="mic-btn-wrap">
+        <div class="mic-ring" id="micRing" aria-hidden="true"></div>
+        <button id="micBtn" aria-label="Start recording" title="Click to record">🎙</button>
+      </div>
+      <p class="mic-label" id="micLabel">Click to record</p>
+
+      <!-- Controls -->
+      <div class="controls-row">
+        <button class="btn btn-primary" id="transcribeNowBtn" title="Stop and transcribe">
+          ✨ Transcribe
+        </button>
+        <button class="btn btn-danger" id="discardBtn" title="Discard recording">
+          🗑 Discard
+        </button>
+      </div>
+
+      <!-- Model selector -->
+      <div class="model-select-wrap">
+        <label for="modelSelect">Model:</label>
+        <select id="modelSelect" title="Select Whisper model size">
+          <option value="tiny">tiny (fastest)</option>
+          <option value="base" selected>base (recommended)</option>
+          <option value="small">small (accurate)</option>
+          <option value="medium">medium (best quality)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Upload Card ──────────────────────────────────────────── -->
+    <div class="card" id="uploadCard">
+      <div class="card-title"><span class="icon">📂</span> Upload Audio File</div>
+
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0"
+           aria-label="Drop audio file here or click to browse">
+        <span class="dz-icon" aria-hidden="true">🎵</span>
+        <span class="dz-text">Drop audio file here</span>
+        <span class="dz-sub">or click to browse</span>
+        <span class="dz-sub">Supports WAV, MP3, WebM, OGG, FLAC, M4A</span>
+      </div>
+
+      <input type="file" id="fileInput" accept="audio/*" style="display:none"
+             aria-label="Upload audio file" />
+
+      <!-- Progress bar -->
+      <div class="progress-bar-wrap" id="progressBarWrap">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+
+      <!-- Supported formats info -->
+      <div style="margin-top:1.25rem;">
+        <div class="card-title" style="margin-bottom:0.75rem;"><span class="icon">ℹ️</span> How it works</div>
+        <ol style="padding-left:1.25rem; font-size:0.82rem; color:var(--text-secondary); line-height:2.1;">
+          <li>Record via microphone <strong style="color:var(--cyan)">or</strong> upload a file</li>
+          <li>Whisper AI transcribes your audio locally</li>
+          <li>Review the full transcript + timestamped segments</li>
+          <li>Copy, download as TXT or export as JSON</li>
+        </ol>
+      </div>
+
+      <div style="margin-top:1.25rem;">
+        <div class="card-title" style="margin-bottom:0.75rem;"><span class="icon">🚀</span> Whisper Models</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+          <thead>
+            <tr style="color:var(--text-muted);">
+              <th style="text-align:left;padding:0.4rem 0;">Model</th>
+              <th style="text-align:left;padding:0.4rem 0;">Speed</th>
+              <th style="text-align:left;padding:0.4rem 0;">Accuracy</th>
+            </tr>
+          </thead>
+          <tbody style="color:var(--text-secondary);">
+            <tr><td>tiny</td><td>⚡⚡⚡</td><td>⭐⭐</td></tr>
+            <tr><td>base</td><td>⚡⚡</td><td>⭐⭐⭐</td></tr>
+            <tr><td>small</td><td>⚡</td><td>⭐⭐⭐⭐</td></tr>
+            <tr><td>medium</td><td>🐌</td><td>⭐⭐⭐⭐⭐</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main-grid -->
+
+  <!-- ── Transcript Card ─────────────────────────────────────────────── -->
+  <div class="card transcript-card" id="transcriptSection">
+    <div class="card-title"><span class="icon">📄</span> Transcript</div>
+
+    <!-- Meta badges -->
+    <div class="transcript-meta" id="transcriptMeta" style="display:none;">
+      <span class="meta-badge badge-lang"  id="badgeLang">🌐 –</span>
+      <span class="meta-badge badge-time"  id="badgeTime">⏱ –</span>
+      <span class="meta-badge badge-words" id="badgeWords">📝 –</span>
+      <span class="meta-badge badge-model" id="badgeModel">🤖 –</span>
+    </div>
+
+    <!-- Text output -->
+    <div class="transcript-box" id="transcriptBox" aria-live="polite" aria-label="Transcript text">
+      <div class="transcript-placeholder" id="transcriptPH">
+        <span class="ph-icon">🎙</span>
+        <span>Your transcript will appear here</span>
+        <span style="font-size:0.7rem;color:var(--text-muted);">Record or upload an audio file to get started</span>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="transcript-actions">
+      <button class="btn btn-primary" id="copyBtn"     title="Copy transcript">📋 Copy</button>
+      <button class="btn"            id="downloadBtn"  title="Download as TXT">⬇️ TXT</button>
+      <button class="btn"            id="jsonBtn"      title="Export as JSON">🗃 JSON</button>
+      <button class="btn btn-danger" id="clearBtn"     title="Clear transcript">🗑 Clear</button>
+    </div>
+  </div>
+
+  <!-- ── Segments Card ──────────────────────────────────────────────── -->
+  <div class="card segments-card" id="segmentsSection" style="margin-top:1.5rem;">
+    <div class="card-title"><span class="icon">⏱</span> Timestamped Segments</div>
+    <div class="segments-list" id="segmentsList" aria-label="Transcript segments with timestamps">
+      <div class="no-segments">Record or upload audio to see timestamped segments</div>
+    </div>
+  </div>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────── -->
+  <footer style="text-align:center; margin-top:3rem; padding:1.5rem 0; border-top:1px solid var(--border);">
+    <p style="font-size:0.75rem; color:var(--text-muted); line-height:1.8;">
+      Built with <span style="color:var(--cyan)">OpenAI Whisper</span> · 
+      <span style="color:var(--purple)">Flask</span> · 
+      <span style="color:var(--green)">Web Audio API</span> ·
+      <span style="color:var(--amber)">MediaRecorder</span>
+      <br/>All transcription runs <strong style="color:var(--text-secondary)">locally on your machine</strong> — no data leaves your device.
+    </p>
+  </footer>
+
+</div><!-- /app-shell -->
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+<script>
+  // Extra: Discard button
+  document.getElementById("discardBtn").addEventListener("click", () => {
+    if (window.isRecording) {
+      // defined in main.js context
+      document.getElementById("micBtn").click(); // stop
+    }
+    // clear chunks
+    if (window.audioChunks) window.audioChunks = [];
+    window.toast("Recording discarded.", "info");
+  });
+</script>
+
+</body>
+</html>

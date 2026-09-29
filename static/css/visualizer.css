@@ -1,0 +1,7 @@
+/* ============================================================
+   VoiceScribe – Visualizer Canvas Animations (canvas helper)
+   Waveform bars + frequency spectrum
+   ============================================================ */
+
+/* extra canvas animation state class toggling – handled in main.js */
+canvas { display: block; }
