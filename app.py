@@ -2,9 +2,12 @@
 ASR (Automatic Speech Recognition) Tool - Flask Backend
 Uses OpenAI Whisper for local, offline speech recognition.
 
-Key fix: Whisper's load_audio() hardcodes "ffmpeg" as a command string.
-We monkey-patch whisper.audio so it uses our full ffmpeg path, bypassing
-the PATH lookup entirely.
+Features:
+- Auto-detects ffmpeg across standard PATH and Windows winget/chocolatey locations
+- Injects ffmpeg directory into PATH and monkey-patches whisper.audio.load_audio
+- Supports WAV, MP3, WebM, FLAC, OGG, M4A audio inputs
+- Supports model selection (tiny, base, small, medium)
+- Cache-busting for assets so client browser updates immediately
 """
 
 import os
@@ -32,7 +35,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Locate ffmpeg ────────────────────────────────────────────────────────────
-# Search PATH first, then common Windows install locations
 FFMPEG_SEARCH_PATHS = [
     shutil.which("ffmpeg"),
     r"C:\Users\sharb\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe",
@@ -48,17 +50,21 @@ for _p in FFMPEG_SEARCH_PATHS:
         break
 
 if FFMPEG_PATH:
+    ffmpeg_dir = os.path.dirname(FFMPEG_PATH)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        logger.info(f"Injected ffmpeg directory into PATH: {ffmpeg_dir}")
+
     logger.info(f"ffmpeg located: {FFMPEG_PATH}")
+
     # ── MONKEY-PATCH whisper.audio ────────────────────────────────────────────
-    # Whisper hardcodes the string "ffmpeg" in its cmd list.
-    # We replace load_audio with our own version that uses the full path.
     import whisper.audio as _whisper_audio
 
     _WHISPER_SR = _whisper_audio.SAMPLE_RATE
 
     def _patched_load_audio(file: str, sr: int = _WHISPER_SR) -> np.ndarray:
         cmd = [
-            FFMPEG_PATH,           # <── full path instead of bare "ffmpeg"
+            FFMPEG_PATH,
             "-nostdin",
             "-threads", "0",
             "-i", file,
@@ -80,38 +86,42 @@ if FFMPEG_PATH:
     logger.info("whisper.audio.load_audio patched to use full ffmpeg path ✓")
 
 else:
-    logger.warning("ffmpeg not found — only WAV files will work (numpy fallback).")
+    logger.warning("ffmpeg not found — only 16kHz WAV files will work (wave fallback).")
 
-# ─── Load Whisper Model ───────────────────────────────────────────────────────
-import whisper  # import AFTER patching audio module
+# ─── Load Whisper Models ──────────────────────────────────────────────────────
+import whisper
 
-MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base")
-logger.info(f"Loading Whisper model: '{MODEL_SIZE}' …")
-model = whisper.load_model(MODEL_SIZE)
-logger.info("Whisper model loaded successfully ✓")
+DEFAULT_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base")
+LOADED_MODELS = {}
+
+def get_model(size: str = DEFAULT_MODEL_SIZE):
+    size = size.lower().strip()
+    if size not in LOADED_MODELS:
+        logger.info(f"Loading Whisper model: '{size}' …")
+        LOADED_MODELS[size] = whisper.load_model(size)
+        logger.info(f"Whisper model '{size}' loaded successfully ✓")
+    return LOADED_MODELS[size]
+
+# Pre-warm default model
+logger.info(f"Pre-warming default model: '{DEFAULT_MODEL_SIZE}'")
+get_model(DEFAULT_MODEL_SIZE)
 
 
 # ─── Audio Helpers ────────────────────────────────────────────────────────────
-
 def _read_wav_numpy(wav_path: str) -> np.ndarray:
-    """
-    Read a WAV file with stdlib `wave` — zero external dependencies.
-    Returns float32 array at 16 kHz mono (matches Whisper's expected input).
-    """
+    """Read a WAV file with stdlib wave when ffmpeg is unavailable."""
     with wave.open(wav_path, "rb") as wf:
-        n_ch     = wf.getnchannels()
-        sw       = wf.getsampwidth()      # bytes per sample
+        n_ch = wf.getnchannels()
+        sw = wf.getsampwidth()
         n_frames = wf.getnframes()
-        raw      = wf.readframes(n_frames)
+        raw = wf.readframes(n_frames)
 
     dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sw, np.int16)
-    pcm   = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+    pcm = np.frombuffer(raw, dtype=dtype).astype(np.float32)
 
-    # Stereo → mono
     if n_ch > 1:
         pcm = pcm.reshape(-1, n_ch).mean(axis=1)
 
-    # Normalise to [-1, 1]
     pcm /= float(np.iinfo(dtype).max)
     return pcm
 
@@ -120,14 +130,14 @@ def _read_wav_numpy(wav_path: str) -> np.ndarray:
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", cache_bust=int(time.time()))
 
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     """
-    Accepts a WAV/WebM/MP3/MP4 audio blob, transcribes with Whisper,
-    returns transcript + metadata.
+    Accepts WAV, WebM, MP3, FLAC, OGG, M4A audio blob or file.
+    Transcribes with Whisper, returns transcript + timeline segments.
     """
     if "audio" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
@@ -136,75 +146,64 @@ def transcribe():
     if audio_file.filename == "":
         return jsonify({"error": "Empty filename"}), 400
 
-    # Determine file extension
+    model_size = request.form.get("model", DEFAULT_MODEL_SIZE).strip()
+    try:
+        active_model = get_model(model_size)
+    except Exception as e:
+        logger.warning(f"Could not load requested model '{model_size}': {e}. Falling back to default.")
+        active_model = get_model(DEFAULT_MODEL_SIZE)
+        model_size = DEFAULT_MODEL_SIZE
+
     suffix = os.path.splitext(audio_file.filename)[-1].lower()
     if not suffix:
-        suffix = ".wav"   # default for browser recordings
+        suffix = ".wav"
 
-    # Save uploaded bytes to a temp file
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         audio_file.save(tmp.name)
         tmp_path = tmp.name
 
-    logger.info(
-        f"Received: '{audio_file.filename}'  "
-        f"suffix={suffix}  size={os.path.getsize(tmp_path)} bytes"
-    )
-
-    extra_cleanup = []   # additional temp files to delete
+    file_size = os.path.getsize(tmp_path)
+    logger.info(f"Received: '{audio_file.filename}' (suffix={suffix}, size={file_size} bytes, model={model_size})")
 
     try:
         start = time.perf_counter()
-
         is_wav = suffix in (".wav", ".wave")
 
-        if is_wav:
-            # ── WAV path: read with stdlib wave, pass numpy array to Whisper ──
-            # This completely bypasses Whisper's load_audio() / ffmpeg.
-            logger.info("WAV detected → using numpy reader (no ffmpeg needed)")
+        if FFMPEG_PATH:
+            # ffmpeg decodes any format and resamples to 16kHz mono float32
+            result = active_model.transcribe(tmp_path, fp16=False, verbose=False)
+        elif is_wav:
+            # fallback for WAV if ffmpeg is somehow absent
             audio_np = _read_wav_numpy(tmp_path)
-            result   = model.transcribe(audio_np, fp16=False, verbose=False)
-
-        elif FFMPEG_PATH:
-            # ── Non-WAV path: pass file path to Whisper (uses patched load_audio)
-            logger.info(f"Non-WAV detected → using patched ffmpeg: {FFMPEG_PATH}")
-            result = model.transcribe(tmp_path, fp16=False, verbose=False)
-
+            result = active_model.transcribe(audio_np, fp16=False, verbose=False)
         else:
             return jsonify({
-                "error": (
-                    "ffmpeg is not installed on this machine. "
-                    "Only WAV files are supported without ffmpeg. "
-                    "Please install ffmpeg from https://ffmpeg.org/download.html "
-                    "to transcribe MP3 / WebM / OGG / FLAC files."
-                )
+                "error": "ffmpeg is not found on this machine. Only WAV files are supported without ffmpeg."
             }), 400
 
-        elapsed  = round(time.perf_counter() - start, 2)
-        text     = result.get("text", "").strip()
+        elapsed = round(time.perf_counter() - start, 2)
+        text = result.get("text", "").strip()
         language = result.get("language", "unknown")
         segments = result.get("segments", [])
 
-        logger.info(
-            f"Transcription done in {elapsed}s | lang={language} | chars={len(text)}"
-        )
+        logger.info(f"Transcription done in {elapsed}s | lang={language} | chars={len(text)}")
 
         timeline = [
             {
                 "start": round(s["start"], 2),
-                "end":   round(s["end"],   2),
-                "text":  s["text"].strip(),
+                "end": round(s["end"], 2),
+                "text": s["text"].strip(),
             }
             for s in segments
         ]
 
         return jsonify({
-            "success":    True,
+            "success": True,
             "transcript": text,
-            "language":   language,
+            "language": language,
             "duration_s": elapsed,
-            "segments":   timeline,
-            "model":      MODEL_SIZE,
+            "segments": timeline,
+            "model": model_size,
         })
 
     except Exception as exc:
@@ -212,20 +211,20 @@ def transcribe():
         return jsonify({"error": f"Transcription failed: {exc}"}), 500
 
     finally:
-        for path in [tmp_path] + extra_cleanup:
-            try:
-                if path and os.path.exists(path):
-                    os.unlink(path)
-            except OSError:
-                pass
+        try:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 @app.route("/health")
 def health():
     return jsonify({
-        "status":    "ok",
-        "model":     MODEL_SIZE,
-        "ffmpeg":    bool(FFMPEG_PATH),
+        "status": "ok",
+        "default_model": DEFAULT_MODEL_SIZE,
+        "loaded_models": list(LOADED_MODELS.keys()),
+        "ffmpeg": bool(FFMPEG_PATH),
         "ffmpeg_path": FFMPEG_PATH or "not found",
         "timestamp": time.time(),
     })
@@ -234,7 +233,7 @@ def health():
 @app.route("/models")
 def list_models():
     sizes = ["tiny", "base", "small", "medium", "large"]
-    return jsonify({"available": sizes, "current": MODEL_SIZE})
+    return jsonify({"available": sizes, "current": DEFAULT_MODEL_SIZE})
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

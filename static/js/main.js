@@ -181,6 +181,10 @@ function mergeChunks(chunks) {
   return merged;
 }
 
+let lastRecordedBlob     = null;
+let lastRecordedFilename = "recording.wav";
+let isTranscribing       = false;
+
 // ── Microphone Recording (PCM → WAV) ─────────────────────────────────────────
 async function startRecording() {
   try {
@@ -190,6 +194,9 @@ async function startRecording() {
 
     // AudioContext at desired sample rate
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
     const source = audioCtx.createMediaStreamSource(micStream);
 
     // Analyser for visualizer
@@ -210,6 +217,7 @@ async function startRecording() {
 
     // UI updates
     isRecording = true;
+    lastRecordedBlob = null;
     micBtn.classList.add("recording");
     micRing.classList.add("active");
     micLabel.classList.add("recording");
@@ -228,12 +236,16 @@ async function startRecording() {
   }
 }
 
-function stopRecording() {
-  if (!scriptProcessor) return;
+function stopRecording(autoTranscribe = false) {
+  if (!scriptProcessor && !isRecording) return;
 
-  // Disconnect
-  scriptProcessor.disconnect();
-  scriptProcessor.onaudioprocess = null;
+  const actualSr = audioCtx ? audioCtx.sampleRate : SAMPLE_RATE;
+
+  // Disconnect audio nodes
+  if (scriptProcessor) {
+    scriptProcessor.disconnect();
+    scriptProcessor.onaudioprocess = null;
+  }
   if (micStream) micStream.getTracks().forEach(t => t.stop());
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   analyser = null;
@@ -246,55 +258,79 @@ function stopRecording() {
   micLabel.classList.remove("recording");
   timerEl.classList.remove("recording");
   micBtn.innerHTML = "🎙";
-  micLabel.textContent = "Click to record";
   stopTimer();
   cancelAnimationFrame(animFrame);
   visIdleText.style.opacity = "1";
   drawIdle();
 
-  // Encode + transcribe
-  if (pcmChunks.length === 0) { toast("No audio captured.", "error"); return; }
+  // Encode
+  if (pcmChunks.length === 0) {
+    toast("No audio captured.", "error");
+    micLabel.textContent = "Click to record";
+    return;
+  }
   const merged = mergeChunks(pcmChunks);
-  const wavBlob = encodeWav(merged, SAMPLE_RATE);
+  lastRecordedBlob = encodeWav(merged, actualSr);
+  lastRecordedFilename = "recording.wav";
   pcmChunks = [];
-  setServerStatus("transcribing");
-  transcribeBlob(wavBlob, "recording.wav").then(() => setServerStatus("ready"));
+
+  const recordedDuration = timerEl.textContent;
+  micLabel.textContent = `Recorded (${recordedDuration}) · Click ✨ Transcribe`;
+
+  if (autoTranscribe) {
+    transcribeBlob(lastRecordedBlob, lastRecordedFilename);
+  } else {
+    toast(`Recording saved (${recordedDuration}). Click "✨ Transcribe" to proceed.`, "info", 4000);
+  }
 }
 
 // ── Mic Button ────────────────────────────────────────────────────────────────
-micBtn.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
+micBtn.addEventListener("click", () => {
+  if (isRecording) {
+    stopRecording(false);
+  } else {
+    startRecording();
+  }
+});
 
-// ── "✨ Transcribe" button — stops recording and sends it ─────────────────────
+// ── "✨ Transcribe" button ────────────────────────────────────────────────────
 document.getElementById("transcribeNowBtn").addEventListener("click", () => {
   if (isRecording) {
-    stopRecording();   // stopRecording() automatically transcribes
+    stopRecording(true);
+  } else if (lastRecordedBlob) {
+    transcribeBlob(lastRecordedBlob, lastRecordedFilename);
   } else {
-    toast("Start a recording first by clicking the mic button.", "info");
+    toast("Record your voice or upload a file first.", "info");
   }
 });
 
 // ── "🗑 Discard" button ────────────────────────────────────────────────────────
 document.getElementById("discardBtn").addEventListener("click", () => {
   if (isRecording) {
-    // Stop everything without transcribing
-    scriptProcessor && scriptProcessor.disconnect();
-    if (scriptProcessor) scriptProcessor.onaudioprocess = null;
+    if (scriptProcessor) {
+      scriptProcessor.disconnect();
+      scriptProcessor.onaudioprocess = null;
+    }
     if (micStream) micStream.getTracks().forEach(t => t.stop());
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
-    analyser = null; scriptProcessor = null; isRecording = false; pcmChunks = [];
-    micBtn.classList.remove("recording");
-    micRing.classList.remove("active");
-    micLabel.classList.remove("recording");
-    timerEl.classList.remove("recording");
-    micBtn.innerHTML = "🎙";
-    micLabel.textContent = "Click to record";
-    stopTimer();
-    cancelAnimationFrame(animFrame);
-    visIdleText.style.opacity = "1";
-    drawIdle();
-    setServerStatus("ready");
+    analyser = null;
+    scriptProcessor = null;
+    isRecording = false;
   }
   pcmChunks = [];
+  lastRecordedBlob = null;
+  micBtn.classList.remove("recording");
+  micRing.classList.remove("active");
+  micLabel.classList.remove("recording");
+  timerEl.classList.remove("recording");
+  timerEl.textContent = "00:00";
+  micBtn.innerHTML = "🎙";
+  micLabel.textContent = "Click to record";
+  stopTimer();
+  cancelAnimationFrame(animFrame);
+  visIdleText.style.opacity = "1";
+  drawIdle();
+  setServerStatus("ready");
   toast("Recording discarded.", "info");
 });
 
@@ -312,18 +348,29 @@ fileInput.addEventListener("change", () => { if (fileInput.files[0]) handleFileU
 async function handleFileUpload(file) {
   const ok = /\.(wav|mp3|webm|ogg|flac|m4a)$/i.test(file.name) || file.type.startsWith("audio/");
   if (!ok) { toast("Unsupported file type. Please upload an audio file.", "error"); return; }
+  lastRecordedBlob = file;
+  lastRecordedFilename = file.name;
+  micLabel.textContent = `File ready: ${file.name}`;
   toast(`Uploading "${file.name}"…`, "info");
   await transcribeBlob(file, file.name);
 }
 
 // ── Core Transcription ────────────────────────────────────────────────────────
 async function transcribeBlob(blob, filename) {
+  if (isTranscribing) {
+    toast("Transcription is already running…", "info");
+    return;
+  }
+  isTranscribing = true;
   showSpinner(true);
   showProgress(true);
   animateProgress();
+  setServerStatus("transcribing");
 
   const formData = new FormData();
   formData.append("audio", blob, filename);
+  const selectedModel = modelSelect ? modelSelect.value : "base";
+  formData.append("model", selectedModel);
 
   try {
     const res  = await fetch("/transcribe", { method:"POST", body: formData });
@@ -339,8 +386,10 @@ async function transcribeBlob(blob, filename) {
     toast(`Error: ${err.message}`, "error", 6000);
     console.error(err);
   } finally {
+    isTranscribing = false;
     showSpinner(false);
     showProgress(false);
+    setServerStatus("ready");
   }
 }
 

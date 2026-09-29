@@ -15,8 +15,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <!-- Styles -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/visualizer.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ cache_bust }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/visualizer.css') }}?v={{ cache_bust }}" />
 </head>
 <body>
 
@@ -229,7 +229,7 @@
 
 </div><!-- /app-shell -->
 
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
 
 
 
