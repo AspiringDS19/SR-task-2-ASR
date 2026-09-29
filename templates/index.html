@@ -34,17 +34,59 @@
 
   <!-- ── Header ──────────────────────────────────────────────────────── -->
   <header class="header">
-    <div class="logo">
-      <div class="logo-icon" aria-hidden="true">🎙</div>
+    <div class="logo-wrap">
+      <div class="logo-icon-wrap" aria-hidden="true">
+        <svg class="brand-svg-logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="brandGrad" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="var(--accent-primary)" />
+              <stop offset="50%" stop-color="var(--accent-secondary)" />
+              <stop offset="100%" stop-color="var(--accent-tertiary)" />
+            </linearGradient>
+            <filter id="logoGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="2.5" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+          </defs>
+          <!-- Outer glowing squircle frame -->
+          <rect x="3" y="3" width="42" height="42" rx="13" fill="url(#brandGrad)" fill-opacity="0.16" stroke="url(#brandGrad)" stroke-width="1.8" />
+          <!-- Animated sound waves -->
+          <rect x="11" y="20" width="3.2" height="8" rx="1.6" fill="url(#brandGrad)" />
+          <rect x="17" y="14" width="3.2" height="20" rx="1.6" fill="url(#brandGrad)" filter="url(#logoGlow)" />
+          <rect x="23" y="9" width="3.2" height="30" rx="1.6" fill="#ffffff" />
+          <rect x="29" y="15" width="3.2" height="18" rx="1.6" fill="url(#brandGrad)" filter="url(#logoGlow)" />
+          <rect x="35" y="21" width="3.2" height="6" rx="1.6" fill="url(#brandGrad)" />
+          <!-- Center pulse node -->
+          <circle cx="24.6" cy="14" r="2.2" fill="var(--accent-primary)" />
+        </svg>
+      </div>
+
       <div class="logo-text">
-        <h1>VoiceScribe</h1>
-        <p>Automatic Speech Recognition</p>
+        <div class="logo-title-row">
+          <h1 class="brand-title">VoiceScribe</h1>
+          <span class="brand-badge">STUDIO ASR</span>
+        </div>
+        <p class="brand-subtitle">Offline Speech Recognition · Local Whisper AI</p>
       </div>
     </div>
 
-    <div class="status-pill" id="statusPill">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusLabel">Loading model…</span>
+    <div class="header-right">
+      <!-- Theme Switcher -->
+      <div class="theme-switcher" role="radiogroup" aria-label="Theme Selection">
+        <button type="button" class="theme-btn active" id="themeAppleBtn" data-theme="apple-red" title="Apple Music Red-Black Theme">
+          <span class="theme-icon">🍎</span>
+          <span class="theme-name">Apple Red</span>
+        </button>
+        <button type="button" class="theme-btn" id="themeSpotifyBtn" data-theme="spotify-green" title="Spotify Green-Black Theme">
+          <span class="theme-icon">🟢</span>
+          <span class="theme-name">Spotify</span>
+        </button>
+      </div>
+
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusLabel">Ready</span>
+      </div>
     </div>
   </header>
 
