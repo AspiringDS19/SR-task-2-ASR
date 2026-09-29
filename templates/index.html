@@ -231,18 +231,7 @@
 
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
-<script>
-  // Extra: Discard button
-  document.getElementById("discardBtn").addEventListener("click", () => {
-    if (window.isRecording) {
-      // defined in main.js context
-      document.getElementById("micBtn").click(); // stop
-    }
-    // clear chunks
-    if (window.audioChunks) window.audioChunks = [];
-    window.toast("Recording discarded.", "info");
-  });
-</script>
+
 
 </body>
 </html>

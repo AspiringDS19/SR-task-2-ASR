@@ -264,6 +264,40 @@ function stopRecording() {
 // ── Mic Button ────────────────────────────────────────────────────────────────
 micBtn.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
 
+// ── "✨ Transcribe" button — stops recording and sends it ─────────────────────
+document.getElementById("transcribeNowBtn").addEventListener("click", () => {
+  if (isRecording) {
+    stopRecording();   // stopRecording() automatically transcribes
+  } else {
+    toast("Start a recording first by clicking the mic button.", "info");
+  }
+});
+
+// ── "🗑 Discard" button ────────────────────────────────────────────────────────
+document.getElementById("discardBtn").addEventListener("click", () => {
+  if (isRecording) {
+    // Stop everything without transcribing
+    scriptProcessor && scriptProcessor.disconnect();
+    if (scriptProcessor) scriptProcessor.onaudioprocess = null;
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    analyser = null; scriptProcessor = null; isRecording = false; pcmChunks = [];
+    micBtn.classList.remove("recording");
+    micRing.classList.remove("active");
+    micLabel.classList.remove("recording");
+    timerEl.classList.remove("recording");
+    micBtn.innerHTML = "🎙";
+    micLabel.textContent = "Click to record";
+    stopTimer();
+    cancelAnimationFrame(animFrame);
+    visIdleText.style.opacity = "1";
+    drawIdle();
+    setServerStatus("ready");
+  }
+  pcmChunks = [];
+  toast("Recording discarded.", "info");
+});
+
 // ── File Upload / Drag-Drop ───────────────────────────────────────────────────
 dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("dragover",  (e) => { e.preventDefault(); dropZone.classList.add("drag-over"); });
