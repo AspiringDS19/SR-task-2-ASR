@@ -57,49 +57,13 @@ function resizeCanvas() {
   canvasW = visualizerCanvas.width  = visualizerCanvas.offsetWidth;
   canvasH = visualizerCanvas.height = visualizerCanvas.offsetHeight;
 }
-// ── Theme Management ─────────────────────────────────────────────────────────
-const themeAppleBtn   = document.getElementById("themeAppleBtn");
-const themeSpotifyBtn = document.getElementById("themeSpotifyBtn");
-
-function setTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  try { localStorage.setItem("voicescribe_theme", theme); } catch (_) {}
-
-  if (theme === "spotify-green") {
-    themeSpotifyBtn?.classList.add("active");
-    themeAppleBtn?.classList.remove("active");
-  } else {
-    themeAppleBtn?.classList.add("active");
-    themeSpotifyBtn?.classList.remove("active");
-  }
-}
-
-// Read saved preference or default to Apple Red
-let savedTheme = "apple-red";
-try { savedTheme = localStorage.getItem("voicescribe_theme") || "apple-red"; } catch (_) {}
-setTheme(savedTheme);
-
-themeAppleBtn?.addEventListener("click", () => setTheme("apple-red"));
-themeSpotifyBtn?.addEventListener("click", () => setTheme("spotify-green"));
-
-function getThemeColors() {
-  const isSpotify = document.documentElement.getAttribute("data-theme") === "spotify-green";
-  if (isSpotify) {
-    return {
-      idle: "rgba(30, 215, 96, 0.28)",
-      c1: "30, 215, 96",
-      c2: "29, 185, 84",
-      c3: "0, 245, 155"
-    };
-  }
-  // Apple Music Red-Black
-  return {
-    idle: "rgba(250, 45, 72, 0.28)",
-    c1: "250, 45, 72",
-    c2: "255, 45, 85",
-    c3: "255, 94, 98"
-  };
-}
+// ── Visualizer Palette (Crimson Velvet & Obsidian Red) ─────────────────────
+const VIS_COLORS = {
+  idle: "rgba(250, 45, 72, 0.35)",
+  c1:   "250, 45, 72",
+  c2:   "255, 45, 85",
+  c3:   "255, 94, 98"
+};
 
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
@@ -109,14 +73,13 @@ let idlePhase = 0;
 function drawIdle() {
   ctx2d.clearRect(0, 0, canvasW, canvasH);
   ctx2d.beginPath();
-  const colors = getThemeColors();
   for (let x = 0; x <= canvasW; x++) {
     const y = canvasH/2
             + Math.sin((x + idlePhase) * 0.02) * 6
             + Math.sin((x + idlePhase*0.5) * 0.034) * 2.5;
     x === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
   }
-  ctx2d.strokeStyle = colors.idle;
+  ctx2d.strokeStyle = VIS_COLORS.idle;
   ctx2d.lineWidth = 1.8;
   ctx2d.stroke();
   idlePhase += 1.2;
@@ -131,7 +94,6 @@ function drawBars() {
   analyser.getByteFrequencyData(dataArr);
   ctx2d.clearRect(0, 0, canvasW, canvasH);
 
-  const colors = getThemeColors();
   const barCount = 80;
   const barWidth = (canvasW / barCount) - 2;
   for (let i = 0; i < barCount; i++) {
@@ -141,9 +103,9 @@ function drawBars() {
     const x     = i * (barWidth + 2);
     const y     = (canvasH - barH) / 2;
     const grad  = ctx2d.createLinearGradient(0, y, 0, y + barH);
-    grad.addColorStop(0,   `rgba(${colors.c1}, ${0.35 + value * 0.65})`);
-    grad.addColorStop(0.5, `rgba(${colors.c2}, ${0.25 + value * 0.65})`);
-    grad.addColorStop(1,   `rgba(${colors.c3}, ${0.35 + value * 0.65})`);
+    grad.addColorStop(0,   `rgba(${VIS_COLORS.c1}, ${0.35 + value * 0.65})`);
+    grad.addColorStop(0.5, `rgba(${VIS_COLORS.c2}, ${0.25 + value * 0.65})`);
+    grad.addColorStop(1,   `rgba(${VIS_COLORS.c3}, ${0.35 + value * 0.65})`);
     ctx2d.fillStyle = grad;
     ctx2d.beginPath();
     ctx2d.roundRect(x, y, barWidth, barH, 3);
